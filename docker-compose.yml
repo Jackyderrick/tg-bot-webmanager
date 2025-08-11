@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  telegram-bot-manager:
+    build: .
+    restart: always
+    container_name: telegram-bot-manager
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TELEGRAM_BOT_TOKEN=8148383405:AAEZNgccPDWyAnwbzK-23NrcTF0lfeaVi8Y
+    ports:
+      - "5000:5000"  # Web管理界面端口
+    volumes:
+      - bot-data:/app/bot  # 持久化存储配置和文件
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  bot-data:
+    driver: local

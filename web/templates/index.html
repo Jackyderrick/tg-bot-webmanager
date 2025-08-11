@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Telegram机器人管理界面</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Telegram机器人管理</h1>
+        
+        <!-- 系统状态信息 -->
+        <div class="status-bar">
+            最后更新: {{ config.system.last_updated if config.system and config.system.last_updated else '从未更新' }}
+        </div>
+        
+        <!-- 回复内容管理 -->
+        <div class="section">
+            <h2>回复内容设置</h2>
+            <p>设置按钮对应的回复内容，左侧为按钮文本，右侧为回复内容</p>
+            <div id="responses-container">
+                {% for key, value in config.responses.items() %}
+                <div class="response-item">
+                    <input type="text" class="response-key" value="{{ key }}">
+                    <textarea class="response-value">{{ value }}</textarea>
+                    <button class="remove-response">删除</button>
+                </div>
+                {% endfor %}
+            </div>
+            <button id="add-response">添加回复</button>
+            <button id="save-responses">保存回复设置</button>
+            <div id="response-status" class="status-message"></div>
+        </div>
+        
+        <!-- 键盘按钮管理 -->
+        <div class="section">
+            <h2>键盘按钮设置</h2>
+            <p>设置机器人显示的键盘按钮，每行多个按钮用空格分隔</p>
+            <div id="keyboard-container">
+                {% for row in config.keyboard_buttons %}
+                <div class="keyboard-row">
+                    {% for button in row %}
+                    <input type="text" class="keyboard-button" value="{{ button }}">
+                    {% endfor %}
+                    <button class="add-button">+</button>
+                    <button class="remove-row">删除行</button>
+                </div>
+                {% endfor %}
+            </div>
+            <button id="add-row">添加行</button>
+            <button id="save-keyboard">保存键盘设置</button>
+            <div id="keyboard-status" class="status-message"></div>
+        </div>
+        
+        <!-- 文件设置 -->
+        <div class="section">
+            <h2>文件发送设置</h2>
+            <form action="/update-file-settings" method="post">
+                <div class="form-group">
+                    <label>选择文件：</label>
+                    <select name="file_to_send" required>
+                        {% for file in files %}
+                        <option value="{{ file }}" {% if config.file_to_send == file %}selected{% endif %}>{{ file }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>文件说明：</label>
+                    <input type="text" name="file_caption" value="{{ config.file_caption }}" required>
+                </div>
+                <button type="submit">保存文件设置</button>
+            </form>
+            
+            <div class="upload-section">
+                <h3>上传新文件</h3>
+                <p>支持上传最大20MB的文件，禁止上传可执行文件</p>
+                <form action="/upload-file" method="post" enctype="multipart/form-data">
+                    <input type="file" name="file" accept="*/*" required>
+                    <button type="submit">上传</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 兼容性处理：确保forEach在所有浏览器可用
+        if (window.NodeList && !NodeList.prototype.forEach) {
+            NodeList.prototype.forEach = function(callback, thisArg) {
+                thisArg = thisArg || window;
+                for (var i = 0; i < this.length; i++) {
+                    callback.call(thisArg, this[i], i, this);
+                }
+            };
+        }
+
+        // 回复内容管理
+        document.getElementById('add-response').addEventListener('click', () => {
+            const container = document.getElementById('responses-container');
+            const newItem = document.createElement('div');
+            newItem.className = 'response-item';
+            newItem.innerHTML = `
+                <input type="text" class="response-key" placeholder="按钮文本">
+                <textarea class="response-value" placeholder="回复内容"></textarea>
+                <button class="remove-response">删除</button>
+            `;
+            container.appendChild(newItem);
+            attachRemoveListeners();
+        });
+
+        function attachRemoveListeners() {
+            document.querySelectorAll('.remove-response').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.target.parentElement.remove();
+                });
+            });
+        }
+        attachRemoveListeners();
+
+        document.getElementById('save-responses').addEventListener('click', async () => {
+            const responses = {};
+            document.querySelectorAll('.response-item').forEach(item => {
+                const keyInput = item.querySelector('.response-key');
+                const valueInput = item.querySelector('.response-value');
+                
+                const key = keyInput.value.trim();
+                const value = valueInput.value.trim();
+                
+                if (key && value) {
+                    responses[key] = value;
+                } else {
+                    if (!key) keyInput.classList.add('invalid');
+                    if (!value) valueInput.classList.add('invalid');
+                    
+                    setTimeout(() => {
+                        keyInput.classList.remove('invalid');
+                        valueInput.classList.remove('invalid');
+                    }, 2000);
+                }
+            });
+
+            const status = document.getElementById('response-status');
+            try {
+                const res = await fetch('/update-responses', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ responses })
+                });
+                
+                const result = await res.json();
+                if (res.ok && result.status === 'success') {
+                    status.textContent = '保存成功！';
+                    status.className = 'status-message success';
+                } else {
+                    status.textContent = result.message || '保存失败';
+                    status.className = 'status-message error';
+                }
+            } catch (e) {
+                status.textContent = '保存失败：' + (e.message || '网络错误');
+                status.className = 'status-message error';
+            }
+            setTimeout(() => {
+                status.textContent = '';
+                status.className = 'status-message';
+            }, 3000);
+        });
+
+        // 键盘按钮管理
+        document.getElementById('add-row').addEventListener('click', () => {
+            const container = document.getElementById('keyboard-container');
+            const newRow = document.createElement('div');
+            newRow.className = 'keyboard-row';
+            newRow.innerHTML = `
+                <input type="text" class="keyboard-button" placeholder="按钮1">
+                <button class="add-button">+</button>
+                <button class="remove-row">删除行</button>
+            `;
+            container.appendChild(newRow);
+            attachRowListeners();
+        });
+
+        function attachRowListeners() {
+            // 添加按钮事件
+            document.querySelectorAll('.add-button').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const row = e.target.parentElement;
+                    const newInput = document.createElement('input');
+                    newInput.type = 'text';
+                    newInput.className = 'keyboard-button';
+                    newInput.placeholder = '新按钮';
+                    row.insertBefore(newInput, e.target);
+                });
+            });
+            
+            // 删除行事件
+            document.querySelectorAll('.remove-row').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    if (confirm('确定要删除这一行吗？')) {
+                        e.target.parentElement.remove();
+                    }
+                });
+            });
+        }
+        attachRowListeners();
+
+        document.getElementById('save-keyboard').addEventListener('click', async () => {
+            const keyboard = [];
+            document.querySelectorAll('.keyboard-row').forEach(row => {
+                const buttons = [];
+                row.querySelectorAll('.keyboard-button').forEach(input => {
+                    const value = input.value.trim();
+                    if (value) {
+                        buttons.push(value);
+                        input.classList.remove('invalid');
+                    } else {
+                        input.classList.add('invalid');
+                    }
+                });
+                if (buttons.length > 0) {
+                    keyboard.push(buttons);
+                }
+            });
+
+            const status = document.getElementById('keyboard-status');
+            try {
+                const res = await fetch('/update-keyboard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyboard })
+                });
+                
+                const result = await res.json();
+                if (res.ok && result.status === 'success') {
+                    status.textContent = '保存成功！';
+                    status.className = 'status-message success';
+                } else {
+                    status.textContent = result.message || '保存失败';
+                    status.className = 'status-message error';
+                }
+            } catch (e) {
+                status.textContent = '保存失败：' + (e.message || '网络错误');
+                status.className = 'status-message error';
+            }
+            setTimeout(() => {
+                status.textContent = '';
+                status.className = 'status-message';
+            }, 3000);
+        });
+
+        // 表单提交确认
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                if (!confirm('确定要保存这些设置吗？')) {
+                    e.preventDefault();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+    
