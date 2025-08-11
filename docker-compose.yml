@@ -7,7 +7,7 @@ services:
     container_name: telegram-bot-manager
     environment:
       - PYTHONUNBUFFERED=1
-      - TELEGRAM_BOT_TOKEN=8148383405:AAEZNgccPDWyAnwbzK-23NrcTF0lfeaVi8Y
+      - TELEGRAM_BOT_TOKEN=用你自己的
     ports:
       - "5000:5000"  # Web管理界面端口
     volumes:
