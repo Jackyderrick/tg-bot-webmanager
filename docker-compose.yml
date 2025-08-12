@@ -7,7 +7,9 @@ services:
     container_name: telegram-bot-manager
     environment:
       - PYTHONUNBUFFERED=1
-      - TELEGRAM_BOT_TOKEN=用你自己的
+      - TELEGRAM_BOT_TOKEN=8148383405:AAEZNgccPDWyAnwbzK-23NrcTF0lfeaVi8Y  # 替换为你的Token
+      - ADMIN_USERNAME=admin  # Web管理界面用户名
+      - ADMIN_PASSWORD=ji2022109678  # 建议修改为强密码
     ports:
       - "5000:5000"  # Web管理界面端口
     volumes:
@@ -27,3 +29,4 @@ services:
 volumes:
   bot-data:
     driver: local
+    

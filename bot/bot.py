@@ -7,6 +7,9 @@ import logging
 import os
 import json
 from pathlib import Path
+from datetime import datetime, timedelta
+from apscheduler.schedulers.background import BackgroundScheduler
+import uuid
 
 # 配置日志
 logging.basicConfig(
@@ -20,6 +23,10 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
 
 # 机器人Token（从环境变量获取）
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8148383405:AAEZNgccPDWyAnwbzK-23NrcTF0lfeaVi8Y')
+
+# 初始化调度器
+scheduler = BackgroundScheduler()
+scheduler.start()
 
 
 def load_config():
@@ -42,7 +49,12 @@ def load_config():
                 ["隐藏键盘"]
             ],
             "file_to_send": "example_file.txt",
-            "file_caption": "这是您请求的文件"
+            "file_caption": "这是您请求的文件",
+            "users": [],
+            "notifications": {
+                "pending": [],
+                "sent": []
+            }
         }
 
 
@@ -53,6 +65,15 @@ def save_config(config):
             json.dump(config, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"保存配置文件失败: {str(e)}")
+
+
+def add_user(user_id):
+    """添加用户到数据库（去重）"""
+    config = load_config()
+    if user_id not in config['users']:
+        config['users'].append(user_id)
+        save_config(config)
+        logger.info(f"添加新用户: {user_id}")
 
 
 def create_example_file(file_path):
@@ -70,6 +91,8 @@ def start(update: Update, context: CallbackContext) -> None:
         config = load_config()
         user = update.effective_user
         if user:
+            # 添加用户到数据库
+            add_user(user.id)
             update.message.reply_html(
                 f"你好 {user.mention_html()}！\n点击下方键盘按钮使用功能～"
             )
@@ -89,6 +112,11 @@ def start(update: Update, context: CallbackContext) -> None:
 def handle_keyboard_click(update: Update, context: CallbackContext) -> None:
     """处理键盘按钮点击"""
     try:
+        # 添加用户到数据库
+        user = update.effective_user
+        if user:
+            add_user(user.id)
+            
         config = load_config()
         user_message = update.message.text.strip()
         
@@ -171,6 +199,129 @@ def error_handler(update: Update, context: CallbackContext) -> None:
             pass
 
 
+# 通知相关功能
+def send_notification_to_users(context: CallbackContext, message: str, notification_id: str = None):
+    """向所有用户发送通知"""
+    config = load_config()
+    success_count = 0
+    fail_count = 0
+    
+    for user_id in config['users']:
+        try:
+            context.bot.send_message(chat_id=user_id, text=message)
+            success_count += 1
+        except Exception as e:
+            logger.error(f"向用户 {user_id} 发送通知失败: {str(e)}")
+            fail_count += 1
+    
+    logger.info(f"通知发送完成: 成功 {success_count} 人, 失败 {fail_count} 人")
+    
+    # 更新通知状态为已发送
+    if notification_id:
+        config = load_config()
+        # 查找并移动通知到已发送列表
+        for i, notification in enumerate(config['notifications']['pending']):
+            if notification['id'] == notification_id:
+                notification['status'] = 'sent'
+                notification['sent_time'] = datetime.now().isoformat()
+                config['notifications']['sent'].append(notification)
+                del config['notifications']['pending'][i]
+                save_config(config)
+                break
+
+
+def send_immediate_notification(message: str):
+    """立即发送通知"""
+    try:
+        # 使用Updater获取bot上下文发送消息
+        updater = Updater(TOKEN)
+        context = updater.bot
+        send_notification_to_users(CallbackContext(updater.dispatcher), message)
+        
+        # 记录已发送通知
+        config = load_config()
+        config['notifications']['sent'].append({
+            'id': str(uuid.uuid4()),
+            'message': message,
+            'type': 'immediate',
+            'status': 'sent',
+            'sent_time': datetime.now().isoformat()
+        })
+        save_config(config)
+        return True, "通知已立即发送"
+    except Exception as e:
+        logger.error(f"立即发送通知失败: {str(e)}")
+        return False, f"发送失败: {str(e)}"
+
+
+def schedule_notification(message: str, scheduled_time: datetime):
+    """定时发送通知"""
+    try:
+        notification_id = str(uuid.uuid4())
+        
+        # 计算与当前时间的差值（秒）
+        now = datetime.now()
+        delay = (scheduled_time - now).total_seconds()
+        
+        if delay <= 0:
+            return False, "定时时间必须晚于当前时间"
+        
+        # 使用调度器安排任务
+        job = scheduler.add_job(
+            send_notification_to_users,
+            'date',
+            run_date=scheduled_time,
+            args=[CallbackContext(Updater(TOKEN).dispatcher), message, notification_id]
+        )
+        
+        # 保存定时通知到配置
+        config = load_config()
+        config['notifications']['pending'].append({
+            'id': notification_id,
+            'message': message,
+            'type': 'scheduled',
+            'status': 'pending',
+            'scheduled_time': scheduled_time.isoformat(),
+            'job_id': job.id
+        })
+        save_config(config)
+        
+        return True, f"通知已安排在 {scheduled_time} 发送"
+    except Exception as e:
+        logger.error(f"安排定时通知失败: {str(e)}")
+        return False, f"安排失败: {str(e)}"
+
+
+def cancel_scheduled_notification(notification_id: str):
+    """取消定时通知"""
+    try:
+        config = load_config()
+        # 查找通知
+        for i, notification in enumerate(config['notifications']['pending']):
+            if notification['id'] == notification_id:
+                # 从调度器中移除任务
+                scheduler.remove_job(notification['job_id'])
+                
+                # 从配置中移除
+                del config['notifications']['pending'][i]
+                save_config(config)
+                return True, "通知已取消"
+        
+        return False, "未找到该通知"
+    except Exception as e:
+        logger.error(f"取消通知失败: {str(e)}")
+        return False, f"取消失败: {str(e)}"
+
+
+def load_notifications():
+    """加载所有通知（包括待发送和已发送）"""
+    config = load_config()
+    return {
+        'pending': config['notifications']['pending'],
+        'sent': config['notifications']['sent']
+    }
+
+
 def main() -> None:
     """启动机器人"""
     try:
@@ -180,6 +331,7 @@ def main() -> None:
         if not os.path.exists(file_path):
             create_example_file(file_path)
         
+        # 初始化Updater
         updater = Updater(TOKEN)
         dp = updater.dispatcher
         

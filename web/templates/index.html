@@ -2,23 +2,15 @@
 <html>
 <head>
     <title>Telegram机器人管理界面</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
         <h1>Telegram机器人管理</h1>
         
-        <!-- 系统状态信息 -->
-        <div class="status-bar">
-            最后更新: {{ config.system.last_updated if config.system and config.system.last_updated else '从未更新' }}
-        </div>
-        
         <!-- 回复内容管理 -->
         <div class="section">
             <h2>回复内容设置</h2>
-            <p>设置按钮对应的回复内容，左侧为按钮文本，右侧为回复内容</p>
             <div id="responses-container">
                 {% for key, value in config.responses.items() %}
                 <div class="response-item">
@@ -30,27 +22,25 @@
             </div>
             <button id="add-response">添加回复</button>
             <button id="save-responses">保存回复设置</button>
-            <div id="response-status" class="status-message"></div>
+            <div id="response-status" class="status"></div>
         </div>
         
         <!-- 键盘按钮管理 -->
         <div class="section">
             <h2>键盘按钮设置</h2>
-            <p>设置机器人显示的键盘按钮，每行多个按钮用空格分隔</p>
             <div id="keyboard-container">
                 {% for row in config.keyboard_buttons %}
                 <div class="keyboard-row">
                     {% for button in row %}
                     <input type="text" class="keyboard-button" value="{{ button }}">
                     {% endfor %}
-                    <button class="add-button">+</button>
                     <button class="remove-row">删除行</button>
                 </div>
                 {% endfor %}
             </div>
             <button id="add-row">添加行</button>
             <button id="save-keyboard">保存键盘设置</button>
-            <div id="keyboard-status" class="status-message"></div>
+            <div id="keyboard-status" class="status"></div>
         </div>
         
         <!-- 文件设置 -->
@@ -74,25 +64,115 @@
             
             <div class="upload-section">
                 <h3>上传新文件</h3>
-                <p>支持上传最大20MB的文件，禁止上传可执行文件</p>
                 <form action="/upload-file" method="post" enctype="multipart/form-data">
-                    <input type="file" name="file" accept="*/*" required>
+                    <input type="file" name="file" accept=".txt,.pdf,.doc,.docx,.jpg,.jpeg,.png,.gif">
                     <button type="submit">上传</button>
                 </form>
+                <p class="hint">支持的文件类型：txt, pdf, doc, docx, jpg, jpeg, png, gif（最大50MB）</p>
+            </div>
+        </div>
+        
+        <!-- 通知管理 -->
+        <div class="section">
+            <h2>通知管理</h2>
+            
+            <div class="notification-form">
+                <h3>创建新通知</h3>
+                <div class="form-group">
+                    <label>通知内容：</label>
+                    <textarea id="notification-message" required placeholder="输入要发送的通知内容..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>发送类型：</label>
+                    <select id="notification-type">
+                        <option value="immediate">立即发送</option>
+                        <option value="scheduled">定时发送</option>
+                    </select>
+                </div>
+                <div class="form-group" id="scheduled-time-group" style="display: none;">
+                    <label>定时时间：</label>
+                    <input type="datetime-local" id="scheduled-time">
+                </div>
+                <button id="send-notification-btn">发送通知</button>
+                <div id="notification-status" class="status"></div>
+            </div>
+            
+            <div class="notifications-list">
+                <h3>待发送通知</h3>
+                {% if notifications.pending|length == 0 %}
+                <p>没有待发送的通知</p>
+                {% else %}
+                <table class="notifications-table">
+                    <tr>
+                        <th>ID</th>
+                        <th>内容</th>
+                        <th>定时时间</th>
+                        <th>操作</th>
+                    </tr>
+                    {% for note in notifications.pending %}
+                    <tr>
+                        <td>{{ note.id|truncate(8) }}</td>
+                        <td>{{ note.message|truncate(20) }}</td>
+                        <td>{{ note.scheduled_time }}</td>
+                        <td>
+                            <button class="cancel-notification" data-id="{{ note.id }}">取消</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% endif %}
+            </div>
+            
+            <div class="notifications-list">
+                <h3>已发送通知</h3>
+                {% if notifications.sent|length == 0 %}
+                <p>没有已发送的通知</p>
+                {% else %}
+                <table class="notifications-table">
+                    <tr>
+                        <th>ID</th>
+                        <th>内容</th>
+                        <th>发送时间</th>
+                        <th>状态</th>
+                    </tr>
+                    {% for note in notifications.sent %}
+                    <tr>
+                        <td>{{ note.id|truncate(8) }}</td>
+                        <td>{{ note.message|truncate(20) }}</td>
+                        <td>{{ note.sent_time or note.created_time }}</td>
+                        <td>
+                            {% if note.stats %}
+                            成功: {{ note.stats.success }}, 失败: {{ note.stats.failed }}
+                            {% else %}
+                            {{ note.status }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+                {% endif %}
             </div>
         </div>
     </div>
 
     <script>
-        // 兼容性处理：确保forEach在所有浏览器可用
-        if (window.NodeList && !NodeList.prototype.forEach) {
-            NodeList.prototype.forEach = function(callback, thisArg) {
-                thisArg = thisArg || window;
-                for (var i = 0; i < this.length; i++) {
-                    callback.call(thisArg, this[i], i, this);
+        // 设置默认日期时间为当前时间加5分钟
+        document.addEventListener('DOMContentLoaded', function() {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() + 5);
+            const dateTimeStr = now.toISOString().slice(0, 16);
+            document.getElementById('scheduled-time').value = dateTimeStr;
+            
+            // 显示/隐藏定时时间输入框
+            document.getElementById('notification-type').addEventListener('change', function() {
+                const timeGroup = document.getElementById('scheduled-time-group');
+                if (this.value === 'scheduled') {
+                    timeGroup.style.display = 'block';
+                } else {
+                    timeGroup.style.display = 'none';
                 }
-            };
-        }
+            });
+        });
 
         // 回复内容管理
         document.getElementById('add-response').addEventListener('click', () => {
@@ -120,22 +200,10 @@
         document.getElementById('save-responses').addEventListener('click', async () => {
             const responses = {};
             document.querySelectorAll('.response-item').forEach(item => {
-                const keyInput = item.querySelector('.response-key');
-                const valueInput = item.querySelector('.response-value');
-                
-                const key = keyInput.value.trim();
-                const value = valueInput.value.trim();
-                
+                const key = item.querySelector('.response-key').value.trim();
+                const value = item.querySelector('.response-value').value.trim();
                 if (key && value) {
                     responses[key] = value;
-                } else {
-                    if (!key) keyInput.classList.add('invalid');
-                    if (!value) valueInput.classList.add('invalid');
-                    
-                    setTimeout(() => {
-                        keyInput.classList.remove('invalid');
-                        valueInput.classList.remove('invalid');
-                    }, 2000);
                 }
             });
 
@@ -146,22 +214,21 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ responses })
                 });
-                
-                const result = await res.json();
-                if (res.ok && result.status === 'success') {
+                const data = await res.json();
+                if (data.status === 'success') {
                     status.textContent = '保存成功！';
-                    status.className = 'status-message success';
+                    status.className = 'status success';
                 } else {
-                    status.textContent = result.message || '保存失败';
-                    status.className = 'status-message error';
+                    status.textContent = '保存失败';
+                    status.className = 'status error';
                 }
             } catch (e) {
-                status.textContent = '保存失败：' + (e.message || '网络错误');
-                status.className = 'status-message error';
+                status.textContent = '保存失败：' + e.message;
+                status.className = 'status error';
             }
             setTimeout(() => {
                 status.textContent = '';
-                status.className = 'status-message';
+                status.className = 'status';
             }, 3000);
         });
 
@@ -172,36 +239,21 @@
             newRow.className = 'keyboard-row';
             newRow.innerHTML = `
                 <input type="text" class="keyboard-button" placeholder="按钮1">
-                <button class="add-button">+</button>
+                <input type="text" class="keyboard-button" placeholder="按钮2">
                 <button class="remove-row">删除行</button>
             `;
             container.appendChild(newRow);
-            attachRowListeners();
+            attachRowRemoveListeners();
         });
 
-        function attachRowListeners() {
-            // 添加按钮事件
-            document.querySelectorAll('.add-button').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const row = e.target.parentElement;
-                    const newInput = document.createElement('input');
-                    newInput.type = 'text';
-                    newInput.className = 'keyboard-button';
-                    newInput.placeholder = '新按钮';
-                    row.insertBefore(newInput, e.target);
-                });
-            });
-            
-            // 删除行事件
+        function attachRowRemoveListeners() {
             document.querySelectorAll('.remove-row').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    if (confirm('确定要删除这一行吗？')) {
-                        e.target.parentElement.remove();
-                    }
+                    e.target.parentElement.remove();
                 });
             });
         }
-        attachRowListeners();
+        attachRowRemoveListeners();
 
         document.getElementById('save-keyboard').addEventListener('click', async () => {
             const keyboard = [];
@@ -209,16 +261,9 @@
                 const buttons = [];
                 row.querySelectorAll('.keyboard-button').forEach(input => {
                     const value = input.value.trim();
-                    if (value) {
-                        buttons.push(value);
-                        input.classList.remove('invalid');
-                    } else {
-                        input.classList.add('invalid');
-                    }
+                    if (value) buttons.push(value);
                 });
-                if (buttons.length > 0) {
-                    keyboard.push(buttons);
-                }
+                if (buttons.length > 0) keyboard.push(buttons);
             });
 
             const status = document.getElementById('keyboard-status');
@@ -228,30 +273,104 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ keyboard })
                 });
-                
-                const result = await res.json();
-                if (res.ok && result.status === 'success') {
+                const data = await res.json();
+                if (data.status === 'success') {
                     status.textContent = '保存成功！';
-                    status.className = 'status-message success';
+                    status.className = 'status success';
                 } else {
-                    status.textContent = result.message || '保存失败';
-                    status.className = 'status-message error';
+                    status.textContent = '保存失败';
+                    status.className = 'status error';
                 }
             } catch (e) {
-                status.textContent = '保存失败：' + (e.message || '网络错误');
-                status.className = 'status-message error';
+                status.textContent = '保存失败：' + e.message;
+                status.className = 'status error';
             }
             setTimeout(() => {
                 status.textContent = '';
-                status.className = 'status-message';
+                status.className = 'status';
             }, 3000);
         });
 
-        // 表单提交确认
-        document.querySelectorAll('form').forEach(form => {
-            form.addEventListener('submit', function(e) {
-                if (!confirm('确定要保存这些设置吗？')) {
-                    e.preventDefault();
+        // 通知管理
+        document.getElementById('send-notification-btn').addEventListener('click', async () => {
+            const message = document.getElementById('notification-message').value.trim();
+            const type = document.getElementById('notification-type').value;
+            const status = document.getElementById('notification-status');
+            
+            if (!message) {
+                status.textContent = '通知内容不能为空';
+                status.className = 'status error';
+                setTimeout(() => {
+                    status.textContent = '';
+                    status.className = 'status';
+                }, 3000);
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('message', message);
+                formData.append('notification_type', type);
+                
+                if (type === 'scheduled') {
+                    const time = document.getElementById('scheduled-time').value;
+                    if (!time) {
+                        status.textContent = '请选择定时时间';
+                        status.className = 'status error';
+                        setTimeout(() => {
+                            status.textContent = '';
+                            status.className = 'status';
+                        }, 3000);
+                        return;
+                    }
+                    formData.append('scheduled_time', time);
+                }
+                
+                const res = await fetch('/send-notification', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                
+                status.textContent = data.message;
+                status.className = data.status === 'success' ? 'status success' : 'status error';
+                
+                // 成功后刷新页面
+                if (data.status === 'success') {
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                }
+            } catch (e) {
+                status.textContent = '发送失败：' + e.message;
+                status.className = 'status error';
+            }
+            
+            setTimeout(() => {
+                status.textContent = '';
+                status.className = 'status';
+            }, 3000);
+        });
+
+        // 取消通知
+        document.querySelectorAll('.cancel-notification').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const notificationId = this.getAttribute('data-id');
+                if (confirm('确定要取消这个通知吗？')) {
+                    try {
+                        const res = await fetch(`/cancel-notification/${notificationId}`, {
+                            method: 'POST'
+                        });
+                        const data = await res.json();
+                        
+                        if (data.status === 'success') {
+                            window.location.reload();
+                        } else {
+                            alert(data.message);
+                        }
+                    } catch (e) {
+                        alert('取消失败：' + e.message);
+                    }
                 }
             });
         });
